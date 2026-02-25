@@ -2,11 +2,15 @@ pipeline {
     agent any
 
     environment {
-        // Forzamos a que no use Proxy para localhost y el clúster
-        NO_PROXY = "localhost,127.0.0.1,kubernetes.default.svc"
-        no_proxy = "localhost,127.0.0.1,kubernetes.default.svc"
-        // Aseguramos la ruta del config (ajusta 'cesar' si tu usuario de Windows es distinto)
-        KUBECONFIG = "C:/Users/cesar/.kube/config" 
+        // "Matamos" cualquier proxy que esté molestando
+        HTTP_PROXY = ""
+        HTTPS_PROXY = ""
+        http_proxy = ""
+        https_proxy = ""
+        NO_PROXY = "*"
+        
+        // Apuntamos al config de tu usuario
+        KUBECONFIG = "C:/Users/cesar/.kube/config"
     }
 
     stages {
@@ -20,13 +24,12 @@ pipeline {
             steps {
                 dir('playwright-cucumber-java') {
                     script {
-                        // Usamos --server indicando explícitamente el localhost de Docker Desktop
-                        // Esto salta cualquier redirección extraña
-                        bat "kubectl --server=https://kubernetes.docker.internal:6443 --insecure-skip-tls-verify delete job playwright-test-job -n qa-automation --ignore-not-found=true"
-                        bat "kubectl --server=https://kubernetes.docker.internal:6443 --insecure-skip-tls-verify apply -f k8s/playwright-job.yaml -n qa-automation"
+                        // Usamos localhost directamente para saltar cualquier capa de red
+                        bat "kubectl --server=https://127.0.0.1:6443 --insecure-skip-tls-verify delete job playwright-test-job -n qa-automation --ignore-not-found=true"
+                        bat "kubectl --server=https://127.0.0.1:6443 --insecure-skip-tls-verify apply -f k8s/playwright-job.yaml -n qa-automation"
                         
-                        echo "Esperando a Kubernetes..."
-                        bat "kubectl wait --for=condition=complete job/playwright-test-job -n qa-automation --timeout=300s"
+                        echo "Esperando ejecución en Kubernetes..."
+                        bat "kubectl --server=https://127.0.0.1:6443 --insecure-skip-tls-verify wait --for=condition=complete job/playwright-test-job -n qa-automation --timeout=300s"
                     }
                 }
             }
@@ -38,10 +41,11 @@ pipeline {
             dir('playwright-cucumber-java') {
                 script {
                     try {
-                        bat "kubectl logs -l job-name=playwright-test-job -n qa-automation"
+                        // Logs para ver los 11 tests en la consola de Jenkins
+                        bat "kubectl --server=https://127.0.0.1:6443 --insecure-skip-tls-verify logs -l job-name=playwright-test-job -n qa-automation"
                         junit '**/target/surefire-reports/*.xml'
                     } catch (e) {
-                        echo "Aun no hay reportes disponibles."
+                        echo "Todavía no hay resultados: ${e.message}"
                     }
                 }
             }
