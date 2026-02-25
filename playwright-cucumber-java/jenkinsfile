@@ -2,34 +2,28 @@ pipeline {
     agent any
 
     environment {
-        // "Matamos" cualquier proxy que esté molestando
+        // Apuntamos DIRECTAMENTE a la copia que Jenkins sí puede leer
+        KUBECONFIG = "C:/ProgramData/Jenkins/.jenkins/.kube/config"
         HTTP_PROXY = ""
         HTTPS_PROXY = ""
-        http_proxy = ""
-        https_proxy = ""
         NO_PROXY = "*"
-        
-        // Apuntamos al config de tu usuario
-        KUBECONFIG = "C:/Users/cesar/.kube/config"
     }
 
     stages {
         stage('Checkout') {
-            steps {
-                checkout scm
-            }
+            steps { checkout scm }
         }
 
         stage('Build & Test') {
             steps {
                 dir('playwright-cucumber-java') {
                     script {
-                        // Usamos localhost directamente para saltar cualquier capa de red
-                        bat "kubectl --server=https://127.0.0.1:6443 --insecure-skip-tls-verify delete job playwright-test-job -n qa-automation --ignore-not-found=true"
-                        bat "kubectl --server=https://127.0.0.1:6443 --insecure-skip-tls-verify apply -f k8s/playwright-job.yaml -n qa-automation"
+                        // Eliminamos el --server para que use lo que dice el archivo config copiado
+                        bat "kubectl delete job playwright-test-job -n qa-automation --ignore-not-found=true"
+                        bat "kubectl apply -f k8s/playwright-job.yaml -n qa-automation"
                         
-                        echo "Esperando ejecución en Kubernetes..."
-                        bat "kubectl --server=https://127.0.0.1:6443 --insecure-skip-tls-verify wait --for=condition=complete job/playwright-test-job -n qa-automation --timeout=300s"
+                        echo "Esperando a Kubernetes..."
+                        bat "kubectl wait --for=condition=complete job/playwright-test-job -n qa-automation --timeout=300s"
                     }
                 }
             }
@@ -41,11 +35,10 @@ pipeline {
             dir('playwright-cucumber-java') {
                 script {
                     try {
-                        // Logs para ver los 11 tests en la consola de Jenkins
-                        bat "kubectl --server=https://127.0.0.1:6443 --insecure-skip-tls-verify logs -l job-name=playwright-test-job -n qa-automation"
+                        bat "kubectl logs -l job-name=playwright-test-job -n qa-automation"
                         junit '**/target/surefire-reports/*.xml'
                     } catch (e) {
-                        echo "Todavía no hay resultados: ${e.message}"
+                        echo "Todavía no hay resultados."
                     }
                 }
             }
