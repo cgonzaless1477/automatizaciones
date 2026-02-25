@@ -2,8 +2,11 @@ pipeline {
     agent any
 
     environment {
-        // Forzamos a que kubectl busque el config en tu carpeta de usuario de Windows
-        KUBECONFIG = "C:/Users/${USERPROFILE.split('\\\\').last()}/.kube/config"
+        // Forzamos a que no use Proxy para localhost y el clúster
+        NO_PROXY = "localhost,127.0.0.1,kubernetes.default.svc"
+        no_proxy = "localhost,127.0.0.1,kubernetes.default.svc"
+        // Aseguramos la ruta del config (ajusta 'cesar' si tu usuario de Windows es distinto)
+        KUBECONFIG = "C:/Users/cesar/.kube/config" 
     }
 
     stages {
@@ -13,35 +16,32 @@ pipeline {
             }
         }
 
-        stage('Build & Test en Kubernetes') {
+        stage('Build & Test') {
             steps {
                 dir('playwright-cucumber-java') {
                     script {
-                        // 1. Limpiamos cualquier rastro del Job anterior para evitar conflictos
-                        bat "kubectl delete job playwright-test-job -n qa-automation --ignore-not-found=true"
+                        // Usamos --server indicando explícitamente el localhost de Docker Desktop
+                        // Esto salta cualquier redirección extraña
+                        bat "kubectl --server=https://kubernetes.docker.internal:6443 --insecure-skip-tls-verify delete job playwright-test-job -n qa-automation --ignore-not-found=true"
+                        bat "kubectl --server=https://kubernetes.docker.internal:6443 --insecure-skip-tls-verify apply -f k8s/playwright-job.yaml -n qa-automation"
                         
-                        // 2. Aplicamos el YAML sin validación externa (evita el error de login)
-                        bat "kubectl apply -f k8s/playwright-job.yaml -n qa-automation --validate=false"
-                        
-                        // 3. Esperamos a que termine
-                        echo "Esperando ejecución de Playwright..."
+                        echo "Esperando a Kubernetes..."
                         bat "kubectl wait --for=condition=complete job/playwright-test-job -n qa-automation --timeout=300s"
                     }
                 }
             }
         }
     }
-
+    
     post {
         always {
             dir('playwright-cucumber-java') {
                 script {
                     try {
-                        // Intentamos traer los logs del pod antes de terminar para que aparezcan en Jenkins
-                        bat "kubectl logs -l job-name=playwright-test-job -n qa-automation --tail=-1"
+                        bat "kubectl logs -l job-name=playwright-test-job -n qa-automation"
                         junit '**/target/surefire-reports/*.xml'
-                    } catch (Exception e) {
-                        echo "No se pudieron obtener reportes o logs: ${e.message}"
+                    } catch (e) {
+                        echo "Aun no hay reportes disponibles."
                     }
                 }
             }
