@@ -1,23 +1,32 @@
 pipeline {
-    agent any // Usamos el agente disponible en tu Docker Desktop
+    agent any
+
+    environment {
+        // Forzamos a que kubectl busque el config en tu carpeta de usuario de Windows
+        KUBECONFIG = "C:/Users/${USERPROFILE.split('\\\\').last()}/.kube/config"
+    }
 
     stages {
         stage('Checkout') {
             steps {
-                // Descarga el código
                 checkout scm
             }
         }
 
         stage('Build & Test en Kubernetes') {
             steps {
-                // Entramos a la carpeta del proyecto
                 dir('playwright-cucumber-java') {
-                    // Ejecutamos el Job usando la ruta correcta al YAML
-                    bat "kubectl apply -f k8s/playwright-job.yaml -n qa-automation"
-                    
-                    // Esperamos a que el job termine (opcional pero recomendado)
-                    bat "kubectl wait --for=condition=complete job/playwright-test-job -n qa-automation --timeout=300s"
+                    script {
+                        // 1. Limpiamos cualquier rastro del Job anterior para evitar conflictos
+                        bat "kubectl delete job playwright-test-job -n qa-automation --ignore-not-found=true"
+                        
+                        // 2. Aplicamos el YAML sin validación externa (evita el error de login)
+                        bat "kubectl apply -f k8s/playwright-job.yaml -n qa-automation --validate=false"
+                        
+                        // 3. Esperamos a que termine
+                        echo "Esperando ejecución de Playwright..."
+                        bat "kubectl wait --for=condition=complete job/playwright-test-job -n qa-automation --timeout=300s"
+                    }
                 }
             }
         }
@@ -25,13 +34,14 @@ pipeline {
 
     post {
         always {
-            // Corregimos el error de junit entrando a la carpeta antes de buscar
             dir('playwright-cucumber-java') {
                 script {
                     try {
+                        // Intentamos traer los logs del pod antes de terminar para que aparezcan en Jenkins
+                        bat "kubectl logs -l job-name=playwright-test-job -n qa-automation --tail=-1"
                         junit '**/target/surefire-reports/*.xml'
                     } catch (Exception e) {
-                        echo "No se encontraron reportes junit todavía."
+                        echo "No se pudieron obtener reportes o logs: ${e.message}"
                     }
                 }
             }
