@@ -1,41 +1,53 @@
 pipeline {
     agent any
 
+    environment {
+        // Ruta exacta donde ahora reside tu config
+        KUBECONFIG = "C:/ProgramData/Jenkins/.jenkins/.kube/config"
+        // Aseguramos que no busque proxies para el clúster local
+        HTTP_PROXY = ""
+        HTTPS_PROXY = ""
+        NO_PROXY = "*"
+    }
+
     stages {
         stage('Checkout') {
-            steps { checkout scm }
+            steps {
+                // Baja el código desde tu repo de GitHub
+                checkout scm
+            }
         }
 
-        stage('Build & Test') {
+        stage('Build & Test en Kubernetes') {
             steps {
                 dir('playwright-cucumber-java') {
                     script {
-                        // Definimos la ruta donde pusiste el archivo
-                        def kubeConfig = "C:/ProgramData/Jenkins/.jenkins/.kube/config"
+                        // Limpieza: Borra el Job anterior para que no de error de "ya existe"
+                        bat "kubectl delete job playwright-test-job -n qa-automation --ignore-not-found=true"
                         
-                        // Forzamos el uso del config y saltamos el proxy con 127.0.0.1
-                        bat "kubectl --kubeconfig=${kubeConfig} --server=https://127.0.0.1:6443 --insecure-skip-tls-verify delete job playwright-test-job -n qa-automation --ignore-not-found=true"
+                        // Lanzamiento: Ejecuta tus 11 tests de Playwright
+                        bat "kubectl apply -f k8s/playwright-job.yaml -n qa-automation"
                         
-                        bat "kubectl --kubeconfig=${kubeConfig} --server=https://127.0.0.1:6443 --insecure-skip-tls-verify apply -f k8s/playwright-job.yaml -n qa-automation"
-                        
-                        echo "Esperando a Kubernetes..."
-                        bat "kubectl --kubeconfig=${kubeConfig} --server=https://127.0.0.1:6443 --insecure-skip-tls-verify wait --for=condition=complete job/playwright-test-job -n qa-automation --timeout=300s"
+                        echo "Esperando que los tests en Kubernetes terminen..."
+                        // Espera hasta 5 minutos a que el Job complete con éxito
+                        bat "kubectl wait --for=condition=complete job/playwright-test-job -n qa-automation --timeout=300s"
                     }
                 }
             }
         }
     }
-    
+
     post {
         always {
             dir('playwright-cucumber-java') {
                 script {
-                    def kubeConfig = "C:/ProgramData/Jenkins/.jenkins/.kube/config"
                     try {
-                        bat "kubectl --kubeconfig=${kubeConfig} --server=https://127.0.0.1:6443 --insecure-skip-tls-verify logs -l job-name=playwright-test-job -n qa-automation"
+                        // Trae los logs del Pod para ver el detalle de los tests en la consola de Jenkins
+                        bat "kubectl logs -l job-name=playwright-test-job -n qa-automation"
+                        // Publica el reporte de Cucumber/JUnit en la interfaz de Jenkins
                         junit '**/target/surefire-reports/*.xml'
-                    } catch (e) {
-                        echo "Aún no hay resultados disponibles."
+                    } catch (Exception e) {
+                        echo "Todavía no hay reportes disponibles: ${e.message}"
                     }
                 }
             }
