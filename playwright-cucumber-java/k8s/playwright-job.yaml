@@ -1,0 +1,38 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: playwright-test-job
+  namespace: qa-automation
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: playwright
+          image: playwright-local:latest  # <--- Este es el nombre que acabas de generar
+          imagePullPolicy: Never         # <--- ESTO ES CRÍTICO: le dice a K8s que use la imagen que acabas de construir
+          env:
+            - name: CUCUMBER_TAGS
+              value: "@Smoke"
+            - name: DISPLAY
+              value: ":99"
+            - name: TEST_USER
+              value: "qa@test.com"
+            - name: TEST_PASS
+              value: "password123"
+            - name: TEST_ENV
+              value: "QA"
+          resources:
+            requests:
+              memory: "1Gi"    # Subimos el mínimo para que Java no sufra
+              cpu: "500m"
+            limits:
+              memory: "2Gi"    # Playwright necesita espacio para los procesos de Chromium
+              cpu: "1"
+          volumeMounts:        # Paso crucial: Montamos la memoria compartida
+            - mountPath: /dev/shm
+              name: dshm
+      volumes:                 # Definimos el volumen tipo RAM
+        - name: dshm
+          emptyDir:
+            medium: Memory

@@ -1,0 +1,26 @@
+pipeline {
+    agent {
+        kubernetes {
+            yamlFile 'k8s/playwright-job.yaml' // Reutilizamos tu YAML
+        }
+    }
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm // Descarga el código de GitHub
+            }
+        }
+        stage('Build & Test') {
+            steps {
+                // Ejecuta el comando de Maven que ya probamos
+                sh 'mvn test -Dheadless=true'
+            }
+        }
+    }
+    post {
+        always {
+            // Aquí es donde guardamos los resultados para no perderlos
+            junit '**/target/surefire-reports/*.xml'
+        }
+    }
+}
