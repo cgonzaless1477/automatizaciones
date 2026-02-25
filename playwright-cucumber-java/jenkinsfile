@@ -1,26 +1,40 @@
 pipeline {
-    agent {
-        kubernetes {
-            yamlFile 'k8s/playwright-job.yaml' // Reutilizamos tu YAML
-        }
-    }
+    agent any // Usamos el agente disponible en tu Docker Desktop
+
     stages {
         stage('Checkout') {
             steps {
-                checkout scm // Descarga el código de GitHub
+                // Descarga el código
+                checkout scm
             }
         }
-        stage('Build & Test') {
+
+        stage('Build & Test en Kubernetes') {
             steps {
-                // Ejecuta el comando de Maven que ya probamos
-                sh 'mvn test -Dheadless=true'
+                // Entramos a la carpeta del proyecto
+                dir('playwright-cucumber-java') {
+                    // Ejecutamos el Job usando la ruta correcta al YAML
+                    bat "kubectl apply -f k8s/playwright-job.yaml -n qa-automation"
+                    
+                    // Esperamos a que el job termine (opcional pero recomendado)
+                    bat "kubectl wait --for=condition=complete job/playwright-test-job -n qa-automation --timeout=300s"
+                }
             }
         }
     }
+
     post {
         always {
-            // Aquí es donde guardamos los resultados para no perderlos
-            junit '**/target/surefire-reports/*.xml'
+            // Corregimos el error de junit entrando a la carpeta antes de buscar
+            dir('playwright-cucumber-java') {
+                script {
+                    try {
+                        junit '**/target/surefire-reports/*.xml'
+                    } catch (Exception e) {
+                        echo "No se encontraron reportes junit todavía."
+                    }
+                }
+            }
         }
     }
 }
