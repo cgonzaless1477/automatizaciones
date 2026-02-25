@@ -1,14 +1,6 @@
 pipeline {
     agent any
 
-    environment {
-        // Apuntamos DIRECTAMENTE a la copia que Jenkins sí puede leer
-        KUBECONFIG = "C:/ProgramData/Jenkins/.jenkins/.kube/config"
-        HTTP_PROXY = ""
-        HTTPS_PROXY = ""
-        NO_PROXY = "*"
-    }
-
     stages {
         stage('Checkout') {
             steps { checkout scm }
@@ -18,12 +10,16 @@ pipeline {
             steps {
                 dir('playwright-cucumber-java') {
                     script {
-                        // Eliminamos el --server para que use lo que dice el archivo config copiado
-                        bat "kubectl delete job playwright-test-job -n qa-automation --ignore-not-found=true"
-                        bat "kubectl apply -f k8s/playwright-job.yaml -n qa-automation"
+                        // Definimos la ruta donde pusiste el archivo
+                        def kubeConfig = "C:/ProgramData/Jenkins/.jenkins/.kube/config"
+                        
+                        // Forzamos el uso del config y saltamos el proxy con 127.0.0.1
+                        bat "kubectl --kubeconfig=${kubeConfig} --server=https://127.0.0.1:6443 --insecure-skip-tls-verify delete job playwright-test-job -n qa-automation --ignore-not-found=true"
+                        
+                        bat "kubectl --kubeconfig=${kubeConfig} --server=https://127.0.0.1:6443 --insecure-skip-tls-verify apply -f k8s/playwright-job.yaml -n qa-automation"
                         
                         echo "Esperando a Kubernetes..."
-                        bat "kubectl wait --for=condition=complete job/playwright-test-job -n qa-automation --timeout=300s"
+                        bat "kubectl --kubeconfig=${kubeConfig} --server=https://127.0.0.1:6443 --insecure-skip-tls-verify wait --for=condition=complete job/playwright-test-job -n qa-automation --timeout=300s"
                     }
                 }
             }
@@ -34,11 +30,12 @@ pipeline {
         always {
             dir('playwright-cucumber-java') {
                 script {
+                    def kubeConfig = "C:/ProgramData/Jenkins/.jenkins/.kube/config"
                     try {
-                        bat "kubectl logs -l job-name=playwright-test-job -n qa-automation"
+                        bat "kubectl --kubeconfig=${kubeConfig} --server=https://127.0.0.1:6443 --insecure-skip-tls-verify logs -l job-name=playwright-test-job -n qa-automation"
                         junit '**/target/surefire-reports/*.xml'
                     } catch (e) {
-                        echo "Todavía no hay resultados."
+                        echo "Aún no hay resultados disponibles."
                     }
                 }
             }
