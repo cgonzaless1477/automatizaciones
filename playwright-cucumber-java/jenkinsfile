@@ -2,18 +2,13 @@ pipeline {
     agent any
 
     environment {
-        // Ruta exacta donde ahora reside tu config
+        // Aseguramos que Jenkins use tu llave de acceso a Kubernetes [cite: 2026-02-11]
         KUBECONFIG = "C:/ProgramData/Jenkins/.jenkins/.kube/config"
-        // Aseguramos que no busque proxies para el clúster local
-        HTTP_PROXY = ""
-        HTTPS_PROXY = ""
-        NO_PROXY = "*"
     }
 
     stages {
         stage('Checkout') {
             steps {
-                // Baja el código desde tu repo de GitHub
                 checkout scm
             }
         }
@@ -22,15 +17,22 @@ pipeline {
             steps {
                 dir('playwright-cucumber-java') {
                     script {
-                        // Limpieza: Borra el Job anterior para que no de error de "ya existe"
+                        // 1. Limpiamos ejecuciones anteriores para que no se mezclen logs
                         bat "kubectl delete job playwright-test-job -n qa-automation --ignore-not-found=true"
-                        
-                        // Lanzamiento: Ejecuta tus 11 tests de Playwright
+
+                        // 2. Lanzamos el Job
                         bat "kubectl apply -f k8s/playwright-job.yaml -n qa-automation"
-                        
-                        echo "Esperando que los tests en Kubernetes terminen..."
-                        // Espera hasta 5 minutos a que el Job complete con éxito
-                        bat "kubectl wait --for=condition=complete job/playwright-test-job -n qa-automation --timeout=300s"
+
+                        // 3. Pequeña espera para que el Pod se cree y pase de 'Pending' a 'Running'
+                        sleep 5
+
+                        // 4. VER EL LOG EN VIVO: El parámetro -f (follow) hace que el log se imprima
+                        // en la consola de Jenkins conforme los tests avanzan.
+                        echo "Iniciando streaming de logs de los tests..."
+                        bat "kubectl logs -f -l job-name=playwright-test-job -n qa-automation --all-containers=true"
+
+                        // 5. Verificación final de éxito
+                        bat "kubectl wait --for=condition=complete job/playwright-test-job -n qa-automation --timeout=60s"
                     }
                 }
             }
@@ -42,12 +44,11 @@ pipeline {
             dir('playwright-cucumber-java') {
                 script {
                     try {
-                        // Trae los logs del Pod para ver el detalle de los tests en la consola de Jenkins
+                        // Opcional: Si quieres asegurar tener el log final en el post-action
                         bat "kubectl logs -l job-name=playwright-test-job -n qa-automation"
-                        // Publica el reporte de Cucumber/JUnit en la interfaz de Jenkins
                         junit '**/target/surefire-reports/*.xml'
                     } catch (Exception e) {
-                        echo "Todavía no hay reportes disponibles: ${e.message}"
+                        echo "No se encontraron reportes o los tests fallaron."
                     }
                 }
             }
